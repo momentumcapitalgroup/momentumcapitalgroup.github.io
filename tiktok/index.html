@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TikTok Publisher | Momentum Capital Group</title>
+<style>
+  :root{--bg:#050505;--card:#111;--line:#262626;--text:#eee;--muted:#9a9a9a;--gold:#F6BCA0;--ok:#7bd88f;--err:#ff7b7b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:720px;margin:0 auto;padding:40px 16px 80px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+  header a{color:var(--gold);text-decoration:none;font-weight:600;letter-spacing:.04em}
+  h1{font-size:1.8rem;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 28px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px}
+  .step{color:var(--gold);font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+  h2{font-size:1.15rem;margin:0 0 14px}
+  button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 20px;cursor:pointer}
+  .primary{background:var(--gold);color:#111}
+  .ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .account{display:flex;align-items:center;gap:14px}
+  .account img{width:52px;height:52px;border-radius:50%;object-fit:cover;background:#222}
+  .account .name{font-weight:600}
+  .muted{color:var(--muted);font-size:.9rem}
+  .videos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .video{border:2px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;background:#000}
+  .video video{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}
+  .video span{display:block;padding:8px 10px;font-size:.85rem}
+  .video.selected{border-color:var(--gold)}
+  .status{margin-top:14px;font-size:.95rem;white-space:pre-line}
+  .status.ok{color:var(--ok)}.status.err{color:var(--err)}
+  .hidden{display:none}
+  footer{margin-top:30px;font-size:.85rem;color:var(--muted)}
+  footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a href="../">MOMENTUM CAPITAL GROUP</a>
+    <span class="muted">Internal tool</span>
+  </header>
+
+  <h1>TikTok Publisher</h1>
+  <p class="sub">Send our property videos to the company TikTok account as drafts. Final caption and posting are done in the TikTok app.</p>
+
+  <section class="card" id="connectCard">
+    <div class="step">Step 1</div>
+    <h2>Connect the company TikTok account</h2>
+    <div id="notConnected">
+      <button class="primary" id="connectBtn">Continue with TikTok</button>
+      <p class="muted">You will be asked to log in to TikTok and allow access to your basic profile and to upload drafts.</p>
+    </div>
+    <div id="connected" class="hidden">
+      <div class="account">
+        <img id="avatar" alt="">
+        <div>
+          <div class="name" id="displayName"></div>
+          <div class="muted">Connected with TikTok</div>
+        </div>
+      </div>
+      <p><button class="ghost" id="disconnectBtn">Disconnect</button></p>
+    </div>
+  </section>
+
+  <section class="card" id="uploadCard">
+    <div class="step">Step 2</div>
+    <h2>Choose a property video</h2>
+    <div class="videos" id="videos"></div>
+    <button class="primary" id="uploadBtn" disabled>Send to TikTok drafts</button>
+    <div class="status" id="status"></div>
+  </section>
+
+  <footer>
+    <a href="../privacy/">Privacy Policy</a> · <a href="../terms/">Terms of Service</a>
+  </footer>
+</main>
+
+<script>
+  // Set to the deployed Vercel project URL (no trailing slash).
+  const API_BASE = 'https://momentum-tiktok-publisher.vercel.app';
+
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
+    del(k) { try { sessionStorage.removeItem(k); } catch {} },
+  };
+  let selectedUrl = null;
+
+  function setStatus(text, kind) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  async function api(path, { method = 'GET', body } = {}) {
+    const headers = {};
+    const token = store.get('tt_token');
+    if (token) headers.Authorization = 'Bearer ' + token;
+    if (body) headers['Content-Type'] = 'application/json';
+    const r = await fetch(API_BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    return r.json();
+  }
+
+  async function connect() {
+    const cfg = await api('/api/config');
+    const state = crypto.randomUUID();
+    store.set('tt_state', state);
+    const q = new URLSearchParams({
+      client_key: cfg.client_key,
+      scope: cfg.scope,
+      response_type: 'code',
+      redirect_uri: cfg.redirect_uri,
+      state,
+    });
+    location.href = 'https://www.tiktok.com/v2/auth/authorize/?' + q;
+  }
+
+  async function handleCallback() {
+    const p = new URLSearchParams(location.search);
+    if (!p.has('code') && !p.has('error')) return;
+    history.replaceState(null, '', location.pathname);
+    if (p.get('error')) return setStatus('TikTok login was cancelled: ' + (p.get('error_description') || p.get('error')), 'err');
+    if (p.get('state') !== store.get('tt_state')) return setStatus('Login check failed. Please try again.', 'err');
+    store.del('tt_state');
+    const t = await api('/api/token', { method: 'POST', body: { code: p.get('code') } });
+    if (!t.access_token) return setStatus('Could not connect: ' + (t.error_description || t.error || 'unknown error'), 'err');
+    store.set('tt_token', t.access_token);
+  }
+
+  async function showAccount() {
+    if (!store.get('tt_token')) return render(false);
+    const me = await api('/api/me');
+    const u = me && me.data && me.data.user;
+    if (!u) { store.del('tt_token'); return render(false); }
+    $('avatar').src = u.avatar_url || '';
+    $('displayName').textContent = u.display_name || 'TikTok account';
+    render(true);
+  }
+
+  function render(isConnected) {
+    $('notConnected').classList.toggle('hidden', isConnected);
+    $('connected').classList.toggle('hidden', !isConnected);
+    $('uploadBtn').disabled = !(isConnected && selectedUrl);
+  }
+
+  async function loadVideos() {
+    const list = await fetch('videos.json', { cache: 'no-store' }).then(r => r.json()).catch(() => []);
+    const wrap = $('videos');
+    list.forEach(v => {
+      const url = new URL(v.file, location.href).href;
+      const el = document.createElement('div');
+      el.className = 'video';
+      el.innerHTML = '<video muted playsinline preload="metadata"></video><span></span>';
+      el.querySelector('video').src = url;
+      el.querySelector('span').textContent = v.title;
+      el.onclick = () => {
+        document.querySelectorAll('.video').forEach(x => x.classList.remove('selected'));
+        el.classList.add('selected');
+        selectedUrl = url;
+        render(!!store.get('tt_token'));
+      };
+      wrap.appendChild(el);
+    });
+  }
+
+  async function upload() {
+    $('uploadBtn').disabled = true;
+    setStatus('Sending video to TikTok…');
+    const r = await api('/api/upload', { method: 'POST', body: { video_url: selectedUrl } });
+    const publishId = r && r.data && r.data.publish_id;
+    if (!publishId) {
+      $('uploadBtn').disabled = false;
+      return setStatus('Upload failed: ' + ((r.error && r.error.message) || r.error || 'unknown error'), 'err');
+    }
+    for (let i = 0; i < 20; i++) {
+      await new Promise(res => setTimeout(res, 3000));
+      const s = await api('/api/status', { method: 'POST', body: { publish_id: publishId } });
+      const st = s && s.data && s.data.status;
+      if (st === 'SEND_TO_USER_INBOX' || st === 'PUBLISH_COMPLETE') {
+        $('uploadBtn').disabled = false;
+        return setStatus('Done. The video is waiting in your TikTok inbox.\nOpen the TikTok app → Inbox to add the caption and post it.', 'ok');
+      }
+      if (st === 'FAILED') {
+        $('uploadBtn').disabled = false;
+        return setStatus('TikTok could not process the video: ' + (s.data.fail_reason || 'unknown reason'), 'err');
+      }
+      setStatus('TikTok is processing the video…');
+    }
+    $('uploadBtn').disabled = false;
+    setStatus('Still processing. Check your TikTok inbox in a few minutes.');
+  }
+
+  $('connectBtn').onclick = connect;
+  $('disconnectBtn').onclick = () => { store.del('tt_token'); render(false); setStatus(''); };
+  $('uploadBtn').onclick = upload;
+
+  (async () => {
+    await loadVideos();
+    await handleCallback();
+    await showAccount();
+  })();
+</script>
+</body>
+</html>
